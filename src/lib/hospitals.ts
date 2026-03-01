@@ -43,13 +43,15 @@ export const pendingVerifications: HospitalVerification[] = loadPending();
 const REGISTERED_KEY = 'jh_registered_hospitals_v1';
 const SUBMISSIONS_KEY = 'jh_hospital_submissions_v1';
 
-type RegisteredHospital = {
+export type RegisteredHospital = {
   regId: string;
   name: string;
   email: string;
   address?: string;
   certificates?: string;
   password?: string;
+  status: 'pending' | 'approved' | 'rejected';
+  registeredAt: number;
 };
 
 function loadRegistered(): Record<string, RegisteredHospital> {
@@ -80,7 +82,6 @@ export const registeredHospitals: Record<string, RegisteredHospital> = loadRegis
 export const hospitalSubmissions: any[] = loadSubmissions();
 
 export function validateHospitalRegNumber(reg: string) {
-  // Expected format HOSP-YYYY-NNNN
   return /^HOSP-\d{4}-\d{4}$/.test(reg);
 }
 
@@ -93,17 +94,43 @@ export function validateHospitalEmail(email: string) {
   } catch (e) { return false; }
 }
 
-export function registerHospital(h: RegisteredHospital) {
-  if (registeredHospitals[h.regId] || approvedHospitals[h.regId]) return false;
-  registeredHospitals[h.regId] = h;
+export function registerHospital(h: Omit<RegisteredHospital, 'status' | 'registeredAt'>) {
+  if (registeredHospitals[h.regId]) return 'exists';
+  registeredHospitals[h.regId] = { ...h, status: 'pending', registeredAt: Date.now() };
   saveRegistered(registeredHospitals);
+  window.dispatchEvent(new CustomEvent('jh:pending-updated'));
+  return 'pending';
+}
+
+export function authenticateHospital(regId: string, password: string): { ok: boolean; reason?: string } {
+  const r = registeredHospitals[regId];
+  if (!r) return { ok: false, reason: 'not_found' };
+  if (r.password !== password) return { ok: false, reason: 'wrong_password' };
+  if (r.status === 'pending') return { ok: false, reason: 'pending_approval' };
+  if (r.status === 'rejected') return { ok: false, reason: 'rejected' };
+  return { ok: true };
+}
+
+export function getPendingHospitalRegistrations(): RegisteredHospital[] {
+  return Object.values(registeredHospitals).filter(h => h.status === 'pending');
+}
+
+export function approveHospitalRegistration(regId: string) {
+  const h = registeredHospitals[regId];
+  if (!h) return false;
+  h.status = 'approved';
+  saveRegistered(registeredHospitals);
+  window.dispatchEvent(new CustomEvent('jh:pending-updated'));
   return true;
 }
 
-export function authenticateHospital(regId: string, password: string) {
-  const r = registeredHospitals[regId];
-  if (!r) return false;
-  return r.password === password;
+export function rejectHospitalRegistration(regId: string) {
+  const h = registeredHospitals[regId];
+  if (!h) return false;
+  h.status = 'rejected';
+  saveRegistered(registeredHospitals);
+  window.dispatchEvent(new CustomEvent('jh:pending-updated'));
+  return true;
 }
 
 export function submitPatientCase(regId: string, data: any) {
@@ -124,7 +151,6 @@ export function submitHospitalVerification(v: Omit<HospitalVerification, 'submit
     pendingVerifications.push(nv);
     savePending(pendingVerifications);
     try { window.dispatchEvent(new CustomEvent('jh:pending-updated')); } catch (e) {}
-    try { console.log('[hospitals] submitted verification', nv); } catch (e) {}
     return true;
   }
   return false;
