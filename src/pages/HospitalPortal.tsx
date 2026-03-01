@@ -6,7 +6,6 @@ import { Textarea } from "@/components/ui/textarea";
 import { useState, useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import {
-  
   authenticateHospital,
   registerHospital,
   validateHospitalEmail,
@@ -15,7 +14,7 @@ import {
   hospitalSubmissions,
 } from "@/lib/hospitals";
 
-type RegisterFormProps = { onRegistered: (regId: string, password: string) => void };
+type RegisterFormProps = { onRegistered: (result: string) => void };
 
 const RegisterForm = ({ onRegistered }: RegisterFormProps) => {
   const [name, setName] = useState('');
@@ -32,13 +31,8 @@ const RegisterForm = ({ onRegistered }: RegisterFormProps) => {
     if (!validateHospitalRegNumber(regNumber)) { alert('Registration number must follow HOSP-YYYY-NNNN'); return; }
     if (password.length < 6) { alert('Password must be at least 6 characters'); return; }
     if (password !== confirm) { alert('Passwords do not match'); return; }
-    const ok = registerHospital({ regId: regNumber, name, email, address, certificates, password });
-    if (ok) {
-      alert('Registration successful — you are logged in');
-      onRegistered(regNumber, password);
-    } else {
-      alert('Registration failed: hospital already registered or approved');
-    }
+    const result = registerHospital({ regId: regNumber, name, email, address, certificates, password });
+    onRegistered(result);
   };
 
   return (
@@ -83,11 +77,8 @@ const RegisterForm = ({ onRegistered }: RegisterFormProps) => {
 const HospitalPortal = () => {
   const [loggedIn, setLoggedIn] = useState(false);
   const [regId, setRegId] = useState('');
-  const [verifSubmitted, setVerifSubmitted] = useState(false);
-  const [orgName, setOrgName] = useState('');
-  const [certificateName, setCertificateName] = useState('');
+  const [pendingMessage, setPendingMessage] = useState('');
   const [view, setView] = useState<'dashboard' | 'submit' | 'my' | 'profile'>('dashboard');
-  // whether the card is showing login or register form
   const [mode, setMode] = useState<'login' | 'register'>('login');
   const navigate = useNavigate();
   const location = useLocation();
@@ -130,78 +121,88 @@ const HospitalPortal = () => {
               </div>
             </div>
 
-            {/* toggle buttons */}
-          <div className="flex space-x-2 mb-6">
-            <button
-              className={`px-4 py-2 rounded ${mode === 'login' ? 'bg-primary text-primary-foreground' : 'bg-muted/10'}`}
-              onClick={() => setMode('login')}
-            >
-              Login
-            </button>
-            <button
-              className={`px-4 py-2 rounded ${mode === 'register' ? 'bg-primary text-primary-foreground' : 'bg-muted/10'}`}
-              onClick={() => setMode('register')}
-            >
-              Register
-            </button>
-          </div>
-
-          {mode === 'login' ? (
-            <div className="p-4 bg-muted/10 rounded-md">
-              <h2 className="font-semibold mb-3">Hospital Login</h2>
-              <div className="space-y-3">
-                <div>
-                  <Label>Hospital Registration ID</Label>
-                  <Input value={regId} onChange={(e) => setRegId(e.target.value)} placeholder="HOSP-2024-0042" className="mt-1" />
-                </div>
-                <div>
-                  <Label>Password</Label>
-                  <Input type="password" id="hospital-pass" placeholder="••••••" className="mt-1" />
-                </div>
-                <Button className="w-full bg-primary text-primary-foreground" onClick={() => {
-                  const passEl = document.getElementById('hospital-pass') as HTMLInputElement | null;
-                  const pwd = passEl?.value || '';
-                  if (!regId || !pwd) { alert('Please enter registration ID and password'); return; }
-                  if (authenticateHospital(regId, pwd)) {
-                    setLoggedIn(true);
-                    navigate('/hospital/dashboard');
-                  } else {
-                    alert('Invalid credentials or not registered');
-                  }
-                }}>
-                  <LogIn className="w-4 h-4 mr-2" /> Sign In
-                </Button>
+            {pendingMessage && (
+              <div className="mb-4 p-4 rounded-lg bg-accent/10 border border-accent/30 text-sm text-foreground">
+                <p className="font-semibold mb-1">⏳ Registration Submitted</p>
+                <p>{pendingMessage}</p>
               </div>
+            )}
+
+            <div className="flex space-x-2 mb-6">
+              <button
+                className={`px-4 py-2 rounded ${mode === 'login' ? 'bg-primary text-primary-foreground' : 'bg-muted/10'}`}
+                onClick={() => { setMode('login'); setPendingMessage(''); }}
+              >
+                Login
+              </button>
+              <button
+                className={`px-4 py-2 rounded ${mode === 'register' ? 'bg-primary text-primary-foreground' : 'bg-muted/10'}`}
+                onClick={() => { setMode('register'); setPendingMessage(''); }}
+              >
+                Register
+              </button>
             </div>
-          ) : (
-            <div className="p-4 bg-muted/10 rounded-md">
-              <h2 className="font-semibold mb-3">Hospital Registration</h2>
-              <RegisterForm onRegistered={(rId, pwd) => { setRegId(rId); setLoggedIn(true); navigate('/hospital/dashboard'); }} />
-            </div>
-          )}
+
+            {mode === 'login' ? (
+              <div className="p-4 bg-muted/10 rounded-md">
+                <h2 className="font-semibold mb-3">Hospital Login</h2>
+                <div className="space-y-3">
+                  <div>
+                    <Label>Hospital Registration ID</Label>
+                    <Input value={regId} onChange={(e) => setRegId(e.target.value)} placeholder="HOSP-2024-0042" className="mt-1" />
+                  </div>
+                  <div>
+                    <Label>Password</Label>
+                    <Input type="password" id="hospital-pass" placeholder="••••••" className="mt-1" />
+                  </div>
+                  <Button className="w-full bg-primary text-primary-foreground" onClick={() => {
+                    const passEl = document.getElementById('hospital-pass') as HTMLInputElement | null;
+                    const pwd = passEl?.value || '';
+                    if (!regId || !pwd) { alert('Please enter registration ID and password'); return; }
+                    const result = authenticateHospital(regId, pwd);
+                    if (result.ok) {
+                      setLoggedIn(true);
+                      navigate('/hospital/dashboard');
+                    } else if (result.reason === 'pending_approval') {
+                      alert('Your registration is pending admin approval. Please wait for the admin to approve your account.');
+                    } else if (result.reason === 'rejected') {
+                      alert('Your registration has been rejected by the admin. Please contact support.');
+                    } else {
+                      alert('Invalid credentials or not registered');
+                    }
+                  }}>
+                    <LogIn className="w-4 h-4 mr-2" /> Sign In
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <div className="p-4 bg-muted/10 rounded-md">
+                <h2 className="font-semibold mb-3">Hospital Registration</h2>
+                <RegisterForm onRegistered={(result) => {
+                  if (result === 'pending') {
+                    setPendingMessage('Your registration has been submitted and is awaiting admin approval. You will be able to log in once approved.');
+                    setMode('login');
+                  } else {
+                    alert('Registration failed: hospital already registered');
+                  }
+                }} />
+              </div>
+            )}
           </div>
         </div>
       </div>
     );
-    }
-    return (
-      <div className="flex min-h-screen">
-      {/* sidebar */}
+  }
+
+  return (
+    <div className="flex min-h-screen">
       <nav className="w-64 bg-slate-50 border-r border-border p-6">
         <h2 className="text-lg font-bold mb-6">HMS Portal</h2>
         <ul className="space-y-3 text-sm">
-          <li>
-            <button className={`w-full text-left ${view === 'dashboard' ? 'font-semibold text-accent' : ''}`} onClick={() => navigate('/hospital/dashboard')}>Dashboard</button>
-          </li>
-          <li>
-            <button className={`w-full text-left ${view === 'submit' ? 'font-semibold text-accent' : ''}`} onClick={() => navigate('/hospital/submit')}>Submit Patient</button>
-          </li>
-          <li>
-            <button className={`w-full text-left ${view === 'my' ? 'font-semibold text-accent' : ''}`} onClick={() => navigate('/hospital/my')}>My Submissions</button>
-          </li>
-          <li>
-            <button className={`w-full text-left ${view === 'profile' ? 'font-semibold text-accent' : ''}`} onClick={() => navigate('/hospital/profile')}>Profile</button>
-          </li>
+          <li><button className={`w-full text-left ${view === 'dashboard' ? 'font-semibold text-accent' : ''}`} onClick={() => navigate('/hospital/dashboard')}>Dashboard</button></li>
+          <li><button className={`w-full text-left ${view === 'submit' ? 'font-semibold text-accent' : ''}`} onClick={() => navigate('/hospital/submit')}>Submit Patient</button></li>
+          <li><button className={`w-full text-left ${view === 'my' ? 'font-semibold text-accent' : ''}`} onClick={() => navigate('/hospital/my')}>My Submissions</button></li>
+          <li><button className={`w-full text-left ${view === 'profile' ? 'font-semibold text-accent' : ''}`} onClick={() => navigate('/hospital/profile')}>Profile</button></li>
         </ul>
       </nav>
 
@@ -230,22 +231,15 @@ const HospitalPortal = () => {
                 </div>
               ))}
             </div>
-
             <div className="bg-card rounded-xl border border-border overflow-hidden p-6 mb-6">
               <h3 className="text-lg font-semibold mb-3">Recent Submissions</h3>
               <ul className="space-y-3">
                 <li className="p-4 bg-muted/10 rounded-md flex justify-between items-center">
-                  <div>
-                    <div className="font-medium">Rahul Sharma</div>
-                    <div className="text-xs text-muted-foreground">Cardiac Arrhythmia</div>
-                  </div>
+                  <div><div className="font-medium">Rahul Sharma</div><div className="text-xs text-muted-foreground">Cardiac Arrhythmia</div></div>
                   <div className="text-sm text-success">approved</div>
                 </li>
                 <li className="p-4 bg-muted/10 rounded-md flex justify-between items-center">
-                  <div>
-                    <div className="font-medium">Priya Patel</div>
-                    <div className="text-xs text-muted-foreground">Kidney Stones</div>
-                  </div>
+                  <div><div className="font-medium">Priya Patel</div><div className="text-xs text-muted-foreground">Kidney Stones</div></div>
                   <div className="text-sm text-amber-600">pending</div>
                 </li>
               </ul>
@@ -257,97 +251,32 @@ const HospitalPortal = () => {
           <div className="bg-card rounded-xl border border-border p-8 shadow-sm">
             <h2 className="text-lg font-semibold text-foreground mb-6">Submit Patient</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <Label>Patient Name</Label>
-                <Input value={patientName} onChange={(e) => setPatientName(e.target.value)} className="mt-1" />
-              </div>
-              <div>
-                <Label>Date of Birth</Label>
-                <Input type="date" value={dob} onChange={(e) => setDob(e.target.value)} className="mt-1" />
-              </div>
-              <div>
-                <Label>Last 4 digits of Aadhaar</Label>
-                <Input value={aadhaarLast4} onChange={(e) => setAadhaarLast4(e.target.value.replace(/\D/g, ''))} maxLength={4} placeholder="1234" className="mt-1" />
-              </div>
-              <div>
-                <Label>Disease Name</Label>
-                <Input value={diseaseName} onChange={(e) => setDiseaseName(e.target.value)} className="mt-1" />
-              </div>
-              <div>
-                <Label>Estimated Total Cost (₹)</Label>
-                <Input type="number" value={estimatedCost} onChange={(e) => setEstimatedCost(e.target.value)} className="mt-1" />
-              </div>
-              <div>
-                <Label>Doctor Registration Number</Label>
-                <Input value={doctorRegNo} onChange={(e) => setDoctorRegNo(e.target.value)} className="mt-1" />
-              </div>
-              <div>
-                <Label>Amount Required (₹)</Label>
-                <Input type="number" value={amountRequired} onChange={(e) => setAmountRequired(e.target.value)} className="mt-1" />
-              </div>
-              <div>
-                <Label>Insurance Available</Label>
-                <div className="mt-1">
-                  <label className="inline-flex items-center gap-2">
-                    <input type="checkbox" checked={insuranceAvailable} onChange={(e) => setInsuranceAvailable(e.target.checked)} />
-                    <span className="text-sm">Has Insurance</span>
-                  </label>
-                </div>
-              </div>
-              {insuranceAvailable && (
-                <div>
-                  <Label>Insurance Coverage (%)</Label>
-                  <Input type="number" value={insuranceCoverage} onChange={(e) => setInsuranceCoverage(e.target.value)} className="mt-1" />
-                </div>
-              )}
-              <div>
-                <Label>Prescription Document</Label>
-                <Input type="file" onChange={(e) => {
-                  const f = (e.target as HTMLInputElement).files?.[0];
-                  setPrescriptionFile(f ? f.name : '');
-                }} className="mt-1" />
-                {prescriptionFile && <p className="text-xs text-muted-foreground mt-1">Selected: {prescriptionFile}</p>}
-              </div>
-              <div>
-                <Label>Medical Report Document</Label>
-                <Input type="file" onChange={(e) => {
-                  const f = (e.target as HTMLInputElement).files?.[0];
-                  setMedicalReportFile(f ? f.name : '');
-                }} className="mt-1" />
-                {medicalReportFile && <p className="text-xs text-muted-foreground mt-1">Selected: {medicalReportFile}</p>}
-              </div>
+              <div><Label>Patient Name</Label><Input value={patientName} onChange={(e) => setPatientName(e.target.value)} className="mt-1" /></div>
+              <div><Label>Date of Birth</Label><Input type="date" value={dob} onChange={(e) => setDob(e.target.value)} className="mt-1" /></div>
+              <div><Label>Last 4 digits of Aadhaar</Label><Input value={aadhaarLast4} onChange={(e) => setAadhaarLast4(e.target.value.replace(/\D/g, ''))} maxLength={4} placeholder="1234" className="mt-1" /></div>
+              <div><Label>Disease Name</Label><Input value={diseaseName} onChange={(e) => setDiseaseName(e.target.value)} className="mt-1" /></div>
+              <div><Label>Estimated Total Cost (₹)</Label><Input type="number" value={estimatedCost} onChange={(e) => setEstimatedCost(e.target.value)} className="mt-1" /></div>
+              <div><Label>Doctor Registration Number</Label><Input value={doctorRegNo} onChange={(e) => setDoctorRegNo(e.target.value)} className="mt-1" /></div>
+              <div><Label>Amount Required (₹)</Label><Input type="number" value={amountRequired} onChange={(e) => setAmountRequired(e.target.value)} className="mt-1" /></div>
+              <div><Label>Insurance Available</Label><div className="mt-1"><label className="inline-flex items-center gap-2"><input type="checkbox" checked={insuranceAvailable} onChange={(e) => setInsuranceAvailable(e.target.checked)} /><span className="text-sm">Has Insurance</span></label></div></div>
+              {insuranceAvailable && <div><Label>Insurance Coverage (%)</Label><Input type="number" value={insuranceCoverage} onChange={(e) => setInsuranceCoverage(e.target.value)} className="mt-1" /></div>}
+              <div><Label>Prescription Document</Label><Input type="file" onChange={(e) => { const f = (e.target as HTMLInputElement).files?.[0]; setPrescriptionFile(f ? f.name : ''); }} className="mt-1" />{prescriptionFile && <p className="text-xs text-muted-foreground mt-1">Selected: {prescriptionFile}</p>}</div>
+              <div><Label>Medical Report Document</Label><Input type="file" onChange={(e) => { const f = (e.target as HTMLInputElement).files?.[0]; setMedicalReportFile(f ? f.name : ''); }} className="mt-1" />{medicalReportFile && <p className="text-xs text-muted-foreground mt-1">Selected: {medicalReportFile}</p>}</div>
             </div>
             <div className="mt-6 flex gap-3">
               <Button className="bg-accent text-accent-foreground" onClick={() => {
-                // validate
                 if (!patientName.trim()) { alert('Patient name required'); return; }
                 if (!dob) { alert('Date of birth required'); return; }
                 if (!/^[0-9]{4}$/.test(aadhaarLast4)) { alert('Aadhaar last 4 digits must be 4 numbers'); return; }
                 if (!diseaseName.trim()) { alert('Disease name required'); return; }
-                const est = Number(estimatedCost);
-                if (Number.isNaN(est) || est <= 0) { alert('Estimated cost must be a positive number'); return; }
-                const amt = Number(amountRequired);
-                if (Number.isNaN(amt) || amt <= 0) { alert('Amount required must be a positive number'); return; }
+                const est = Number(estimatedCost); if (Number.isNaN(est) || est <= 0) { alert('Estimated cost must be a positive number'); return; }
+                const amt = Number(amountRequired); if (Number.isNaN(amt) || amt <= 0) { alert('Amount required must be a positive number'); return; }
                 if (!doctorRegNo.trim()) { alert('Doctor registration number required'); return; }
-                if (insuranceAvailable) {
-                  const cov = Number(insuranceCoverage);
-                  if (Number.isNaN(cov) || cov < 0 || cov > 100) { alert('Insurance coverage must be 0-100'); return; }
-                }
-                // submit
-                const ok = submitPatientCase(regId || 'UNREGISTERED', {
-                  patientName, dob, aadhaarLast4, diseaseName, estimatedCost: est, doctorRegNo, amountRequired: amt, insuranceAvailable, insuranceCoverage: insuranceAvailable ? Number(insuranceCoverage) : 0, prescriptionFile, medicalReportFile,
-                });
-                if (ok) {
-                  alert('Submission saved — status: pending');
-                  // clear form
-                  setPatientName(''); setDob(''); setAadhaarLast4(''); setDiseaseName(''); setEstimatedCost(''); setDoctorRegNo(''); setAmountRequired(''); setInsuranceAvailable(false); setInsuranceCoverage(''); setPrescriptionFile(''); setMedicalReportFile('');
-                  navigate('/hospital/my');
-                } else {
-                  alert('Failed to save submission');
-                }
-              }}>
-                <Upload className="w-4 h-4 mr-2" /> Submit Case
-              </Button>
+                if (insuranceAvailable) { const cov = Number(insuranceCoverage); if (Number.isNaN(cov) || cov < 0 || cov > 100) { alert('Insurance coverage must be 0-100'); return; } }
+                const ok = submitPatientCase(regId || 'UNREGISTERED', { patientName, dob, aadhaarLast4, diseaseName, estimatedCost: est, doctorRegNo, amountRequired: amt, insuranceAvailable, insuranceCoverage: insuranceAvailable ? Number(insuranceCoverage) : 0, prescriptionFile, medicalReportFile });
+                if (ok) { alert('Submission saved — status: pending'); setPatientName(''); setDob(''); setAadhaarLast4(''); setDiseaseName(''); setEstimatedCost(''); setDoctorRegNo(''); setAmountRequired(''); setInsuranceAvailable(false); setInsuranceCoverage(''); setPrescriptionFile(''); setMedicalReportFile(''); navigate('/hospital/my'); }
+                else { alert('Failed to save submission'); }
+              }}><Upload className="w-4 h-4 mr-2" /> Submit Case</Button>
               <Button variant="outline" onClick={() => { setPatientName(''); setDob(''); setAadhaarLast4(''); setDiseaseName(''); setEstimatedCost(''); setDoctorRegNo(''); setAmountRequired(''); setInsuranceAvailable(false); setInsuranceCoverage(''); setPrescriptionFile(''); setMedicalReportFile(''); }}>Reset</Button>
             </div>
           </div>
@@ -365,12 +294,12 @@ const HospitalPortal = () => {
                 </tr>
               </thead>
               <tbody>
-                {hospitalSubmissions.filter(s => s.regId === (regId || 'UNREGISTERED')).map((s, i) => (
-                  <tr key={i} className="border-b border-border">
+                {hospitalSubmissions.filter(s => s.regId === regId).map((s, i) => (
+                  <tr key={i} className="border-b border-border last:border-0">
                     <td className="px-5 py-3">{s.patientName}</td>
                     <td className="px-5 py-3">{s.diseaseName}</td>
-                    <td className="px-5 py-3 font-semibold">₹{s.amountRequired?.toLocaleString?.() || s.estimatedCost}</td>
-                    <td className="px-5 py-3">{s.status}</td>
+                    <td className="px-5 py-3 font-semibold">₹{s.amountRequired?.toLocaleString()}</td>
+                    <td className="px-5 py-3 text-amber-600">{s.status}</td>
                   </tr>
                 ))}
               </tbody>
@@ -379,10 +308,9 @@ const HospitalPortal = () => {
         )}
 
         {view === 'profile' && (
-          <div className="space-y-2">
-            <p><strong>Organization:</strong> AIIMS Delhi</p>
-            <p><strong>Contact:</strong> admin@aiims.edu</p>
-            <p><strong>Reg ID:</strong> HOSP-2024-0042</p>
+          <div className="bg-card rounded-xl border border-border p-6">
+            <h3 className="text-lg font-semibold mb-4">Hospital Profile</h3>
+            <p><strong>Reg ID:</strong> {regId}</p>
           </div>
         )}
       </main>
